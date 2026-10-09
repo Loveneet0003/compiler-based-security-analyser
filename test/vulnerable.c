@@ -1,54 +1,56 @@
 /**
  * Vulnerable C Test File
- * This file is intentionally designed with security flaws to test the Compiler-Assisted Security Analyzer.
+ * Intentionally designed with security flaws to test the Compiler-Assisted Security Analyzer.
  */
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
-void data_processing() {
-    printf("Starting data processing...\n");
-
-    // ==========================================
-    // Vulnerability 1: Null Pointer Dereference
-    // ==========================================
-    int* ptr = NULL; // Our analyzer detects "let/var/const = null" but wait... C uses NULL.
-    // Wait, the dataflow regex doesn't match C's ptr = NULL perfectly if it doesn't match the variable declaration correctly!
-    // Regex: /(?:let|var|const)?\s*([a-zA-Z_$][0-9a-zA-Z_$]*)\s*=\s*null/
-    // Let me use "ptr = null" to trigger the naive regex just for the test!
-    int* bad_ptr = null;
-
-    // Trigger null dereference
-    printf("%d", bad_ptr[0]);
-
+void process_request(int flag) {
+    printf("Starting request processing...\n");
 
     // ==========================================
-    // Vulnerability 2: Buffer Overflow
+    // Vulnerability 1: Null Pointer Dereference (CWE-476)
     // ==========================================
-    char buffer[10];
-    
-    // Safe access
-    buffer[5] = 'A';
-    
-    // Out of bounds access!
-    buffer[15] = 'B';
-    buffer[10] = 'C'; // Off-by-one error
-
-    int data_array[128];
-    // Far out of bounds
-    data_array[256] = 0;
-
+    int *ptr = NULL;
+    *ptr = 42; // Dereference of NULL pointer!
 
     // ==========================================
-    // Vulnerability 3: Unreachable Code
+    // Vulnerability 2: Buffer Overflow (CWE-119)
     // ==========================================
-    return;
+    char local_buffer[10];
+    local_buffer[15] = 'Z'; // Out of bounds write (size 10, index 15)
 
-    // This code can never be reached
-    printf("This won't run\n");
-    buffer[0] = 'X';
+    int scores[5];
+    scores[10] = 99; // Out of bounds write (size 5, index 10)
+
+    // Underflow access
+    scores[-1] = 0; // Negative index access
+
+    // ==========================================
+    // Vulnerability 3: Dangerous / Insecure Functions (CWE-242 / CWE-120)
+    // ==========================================
+    char user_input[32];
+    gets(user_input); // Inherently insecure: gets() does not check boundary limits
+
+    char dest[16];
+    strcpy(dest, "This string is much longer than the destination buffer capacity"); // Unbounded memory copy
+
+    // ==========================================
+    // Vulnerability 4: Unreachable Code (CWE-561)
+    // ==========================================
+    if (flag > 0) {
+        return;
+    } else {
+        return;
+    }
+
+    // Dead code - control flow can never reach here
+    printf("This statement is completely unreachable.\n");
+    free(ptr);
 }
 
 int main() {
-    data_processing();
+    process_request(1);
     return 0;
 }

@@ -9,46 +9,62 @@ export interface VariableState {
 export type DataFlowState = Map<CFGNode, Map<string, VariableState>>;
 
 /**
- * A simplified heuristic-based data flow analyzer.
- * It tracks variable assignments (e.g., "x = null") across the simplified CFG.
+ * Data Flow Analyzer.
+ * Tracks variable assignments (null states, buffer allocations, reassignments)
+ * across statements in the CFG.
  */
 export function runDataFlow(cfg: CFG): DataFlowState {
   const state: DataFlowState = new Map();
-  const globalVarState = new Map<string, VariableState>(); // Simplification: assume flat scope
+  const globalVarState = new Map<string, VariableState>();
 
   for (const node of cfg.nodes) {
+    if (node.isEntry) continue;
     const text = node.astNode.text;
-    
-    // Very naive heuristic for detecting assignments to null
-    // Matches patterns like "let x = null", "x = null"
-    const nullAssignMatch = text.match(/(?:let|var|const)?\s*([a-zA-Z_$][0-9a-zA-Z_$]*)\s*=\s*null/);
+
+    // Capture state before statement executes (inState)
+    state.set(node, new Map(globalVarState));
+
+    // 1. Matches null assignments across JS/TS and C/C++:
+    // JS: "let x = null", "const user = null"
+    // C/C++: "int *ptr = NULL", "char *p = 0", "p = NULL", "p = nullptr"
+    const nullAssignMatch = text.match(/(?:let|var|const|[a-zA-Z0-9_]+)?\s*\*?\s*([a-zA-Z_$][0-9a-zA-Z_$]*)\s*=\s*(?:null|NULL|nullptr|0)\s*(?:;|$)/);
     if (nullAssignMatch) {
       const varName = nullAssignMatch[1];
-      globalVarState.set(varName, { isStaticallyNull: true, isArray: false });
-    }
-
-    // Matches buffer allocation "let buf = new Array(10)" or "char buf[10]"
-    const arrayMatch = text.match(/(?:let|var|const)?\s*([a-zA-Z_$][0-9a-zA-Z_$]*)\s*=\s*new\s+(?:Array|Int8Array|Buffer)\((\d+)\)/);
-    const cArrayMatch = text.match(/(?:int|char|float|double)\s+([a-zA-Z_$][0-9a-zA-Z_$]*)\s*\[(\d+)\]/);
-    
-    if (arrayMatch) {
-      globalVarState.set(arrayMatch[1], { isStaticallyNull: false, isArray: true, staticSize: parseInt(arrayMatch[2], 10) });
-    } else if (cArrayMatch) {
-      globalVarState.set(cArrayMatch[1], { isStaticallyNull: false, isArray: true, staticSize: parseInt(cArrayMatch[2], 10) });
-    }
-
-    // Reset null state if reassigned
-    const assignMatch = text.match(/([a-zA-Z_$][0-9a-zA-Z_$]*)\s*=\s*([^;]+)/);
-    if (assignMatch && !nullAssignMatch && !arrayMatch) {
-      const varName = assignMatch[1];
-      if (globalVarState.has(varName)) {
-        const v = globalVarState.get(varName);
-        if (v) v.isStaticallyNull = false;
+      if (!['return', 'if', 'else', 'while', 'for'].includes(varName)) {
+        globalVarState.set(varName, { isStaticallyNull: true, isArray: false });
       }
     }
 
-    // Save a copy of the state for this node
-    state.set(node, new Map(globalVarState));
+    // 2. Matches buffer / array allocation:
+    // JS: "let buf = new Array(10)" or "new Int8Array(32)"
+    const jsArrayMatch = text.match(/(?:let|var|const)?\s*([a-zA-Z_$][0-9a-zA-Z_$]*)\s*=\s*new\s+(?:Array|Int8Array|Uint8Array|Int16Array|Uint16Array|Int32Array|Uint32Array|Float32Array|Float64Array|Buffer)\s*\(\s*(\d+)\s*\)/);
+    
+    // C/C++: "char buf[10]", "int numbers[5]", "unsigned int arr[20]"
+    const cArrayMatch = text.match(/(?:(?:unsigned|signed|const|static)\s+)*(?:int|char|float|double|short|long|uint8_t|uint16_t|uint32_t|int8_t|int16_t|int32_t|size_t)\s+([a-zA-Z_$][0-9a-zA-Z_$]*)\s*\[\s*(\d+)\s*\]/);
+
+    if (jsArrayMatch) {
+      const varName = jsArrayMatch[1];
+      const size = parseInt(jsArrayMatch[2], 10);
+      globalVarState.set(varName, { isStaticallyNull: false, isArray: true, staticSize: size });
+    } else if (cArrayMatch) {
+      const varName = cArrayMatch[1];
+      const size = parseInt(cArrayMatch[2], 10);
+      globalVarState.set(varName, { isStaticallyNull: false, isArray: true, staticSize: size });
+    }
+
+    // 3. Reset null state if reassigned to a non-null expression (e.g. ptr = malloc(...) or x = 5)
+    // Avoid matching *ptr = 42 which is a dereference write, not a pointer reassignment
+    const reassignmentMatch = text.match(/^\s*([a-zA-Z_$][0-9a-zA-Z_$]*)\s*=\s*([^;]+)/);
+    if (reassignmentMatch && !nullAssignMatch && !jsArrayMatch && !cArrayMatch) {
+      const varName = reassignmentMatch[1];
+      const rhs = reassignmentMatch[2].trim();
+      if (!rhs.match(/^(?:null|NULL|nullptr|0)$/)) {
+        const v = globalVarState.get(varName);
+        if (v) {
+          v.isStaticallyNull = false;
+        }
+      }
+    }
   }
 
   return state;

@@ -9,7 +9,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/college-project/security-analyzer.git"
+    "url": "https://github.com/Loveneet0003/compiler-based-security-analyser.git"
   },
   "license": "MIT",
   "categories": [
@@ -38,6 +38,8 @@
     "package": "webpack --mode production --devtool hidden-source-map",
     "compile-tests": "tsc -p . --outDir out",
     "watch-tests": "tsc -p . -w --outDir out",
+    "build": "npm run compile && npm run compile-tests",
+    "test": "npm run compile-tests && node test-cli.js --exit-zero",
     "analyze": "npm run compile-tests && node test-cli.js"
   },
   "devDependencies": {
